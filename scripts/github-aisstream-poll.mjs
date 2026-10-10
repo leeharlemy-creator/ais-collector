@@ -105,17 +105,19 @@ async function handle(data) {
   if (queue.length >= BATCH_SIZE) await flush();
 }
 
-function decode(raw) {
+async function decode(raw) {
   if (typeof raw === "string") return JSON.parse(raw);
   if (raw instanceof ArrayBuffer) return JSON.parse(new TextDecoder().decode(raw));
+  if (typeof Blob !== "undefined" && raw instanceof Blob) return JSON.parse(await raw.text());
   return JSON.parse(String(raw));
 }
 
 const socket = new WebSocket(AISSTREAM_URL);
+socket.binaryType = "arraybuffer";
 const timer = setInterval(() => void flush(), FLUSH_INTERVAL_MS);
 const stop = async (code = 0) => { clearInterval(timer); try { socket.close(); } catch {} await flush(); console.log(JSON.stringify({ event: "worker_stop", received, inserted, rejected, rejectedByReason })); process.exit(code); };
 socket.addEventListener("open", () => { socket.send(JSON.stringify({ APIKey: env.aisKey, BoundingBoxes: [BBOX], FilterMessageTypes: ["PositionReport", "ShipStaticData"] })); console.log(JSON.stringify({ event: "ais_connected", bbox: [BBOX], runSeconds: RUN_MS / 1000 })); });
-socket.addEventListener("message", (event) => { try { void handle(decode(event.data)); } catch (error) { reject("trame_invalide"); console.error(JSON.stringify({ event: "ais_frame_error", error: String(error) })); } });
+socket.addEventListener("message", async (event) => { try { await handle(await decode(event.data)); } catch (error) { reject("trame_invalide"); console.error(JSON.stringify({ event: "ais_frame_error", error: String(error) })); } });
 socket.addEventListener("error", () => console.error(JSON.stringify({ event: "ais_socket_error" })));
 socket.addEventListener("close", (event) => console.log(JSON.stringify({ event: "ais_closed", code: event.code, reason: event.reason || "non fourni" })));
 setTimeout(() => void stop(0), RUN_MS);
